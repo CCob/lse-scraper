@@ -6,6 +6,7 @@ let Promise = require('bluebird');
 let db = require('./db.js');
 let posts = require('../../src/posts');
 let toMarkdown = require('to-markdown');
+let winston = require('../../node_modules/winston');
 
 const argv = require('minimist')(process.argv.slice(2));
 
@@ -44,7 +45,7 @@ let importPost = function(postInfo){
 	return exists(importedPostKey)
 		.then( (result) => {
 			if(result) {
-				console.log(`No need to add post ${postInfo.id}, already exists`);
+				winston.debug(`No need to add post ${postInfo.id}, already exists`);
 				return false;
 			}
 			else {
@@ -102,28 +103,31 @@ if(argv.pages != null)
 if(argv.ignoreDuplicates != null)
 	ignoreDuplicates = argv.ignoreDuplicates === 'true';
 
+winston.info(`Starting LSE Scraper - delay:${delay} thread:${threadId} pages:${maxPageCount} ignoreDuplicates:${ignoreDuplicates}`);
 
 (function loop(i) {
     const url = `http://www.lse.co.uk/ShareChat.asp?page=${i}&ShareTicker=IRR`;
     new Promise((resolve, reject) => {
-        console.log(`Fetching page ${i}`);
+        winston.debug(`Fetching page ${i} from ${url}`);
          getContent(url)
              .then(parsePage)
 			 .map(importPost)
 			 .then(function(result){
-			 	resolve(result.indexOf(false) > -1);
+			 	const totalAdded = result.reduce( (total,added) => {return (added ? ++total : total)}, 0);
+			 	winston.info(`Added ${totalAdded} posts from page ${i}`);
+			 	resolve(totalAdded);
 			 })
              .catch(reject)
-    }).then( (hadDuplicates) =>  {
-        if(i < maxPageCount && (ignoreDuplicates || !hadDuplicates) ) {
+    }).then( (totalAdded) =>  {
+        if(i < maxPageCount && (ignoreDuplicates || totalAdded > 0) ) {
 			loop(i + 1)
 		}
         else {
-			console.log("Finished!");
+			winston.debug(`Finished page ${i}!`);
 			setTimeout(() => loop(1), delay * 1000);
 		}
     } ).catch(function(error){
-        console.log("Failed: " + error);
+        winston.error("Failed: " + error);
 		setTimeout(() => loop(1), delay * 1000);
     });
 })(1);
