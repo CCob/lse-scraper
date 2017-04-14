@@ -6,8 +6,12 @@ let db = require('./db.js');
 let posts = require('../../src/posts');
 let toMarkdown = require('to-markdown');
 
-const threadId = 14;
-const maxPageCount = 50;
+const argv = require('minimist')(process.argv.slice(2));
+
+let threadId = 14;
+let maxPageCount = 50;
+let delay = 10000;
+let ignoreDuplicates = false;
 
 function getContent (url) {
     // return new pending promise
@@ -38,9 +42,11 @@ let importPost = function(postInfo){
 	const importedPostKey = `_imported_post:${postInfo.id}`;
 	return exists(importedPostKey)
 		.then( (result) => {
-			if(result)
+			if(result) {
 				console.log(`No need to add post ${postInfo.id}, already exists`);
-			else
+				return false;
+			}
+			else {
 				return createPost({
 					uid: 0,
 					tid: threadId,
@@ -48,8 +54,11 @@ let importPost = function(postInfo){
 					timestamp: postInfo.date.getTime(),
 					handle: postInfo.user,
 				}).then((result) => {
-					return setObjectField(importedPostKey,'pid',result.pid);
-				})
+					return setObjectField(importedPostKey, 'pid', result.pid);
+				}).then((() => {
+					return true;
+				}))
+			}
 		})
 };
 
@@ -79,26 +88,42 @@ let parsePage = function(pageContents){
     });
 };
 
+
+if(argv.delay != null)
+	delay = parseInt(argv.delay);
+
+if(argv.thread != null)
+	threadId = parseInt(argv.thread);
+
+if(argv.pages != null)
+	maxPageCount = parseInt(argv.pages);
+
+if(argv.ignoreDuplicates != null)
+	ignoreDuplicates = argv.ignoreDuplicates === 'true';
+
+
 (function loop(i) {
     const url = `http://www.lse.co.uk/ShareChat.asp?page=${i}&ShareTicker=IRR`;
     new Promise((resolve, reject) => {
         console.log(`Fetching page ${i}`);
          getContent(url)
              .then(parsePage)
-			 .each(importPost)
-             .then(resolve)
+			 .map(importPost)
+			 .then(function(result){
+			 	resolve(result.indexOf(false) > -1);
+			 })
              .catch(reject)
-    }).then( () =>  {
-        if(i < maxPageCount) {
+    }).then( (hadDuplicates) =>  {
+        if(i < maxPageCount && (ignoreDuplicates || !hadDuplicates) ) {
 			loop(i + 1)
 		}
         else {
 			console.log("Finished!");
-			setTimeout(() => loop(1), 10000);
+			setTimeout(() => loop(1), delay * 1000);
 		}
     } ).catch(function(error){
         console.log("Failed: " + error);
-		setTimeout(() => loop(1), 10000);
+		setTimeout(() => loop(1), delay * 1000);
     });
 })(1);
 
