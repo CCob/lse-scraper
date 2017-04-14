@@ -1,0 +1,17 @@
+{
+  "name": "lse-scraper",
+  "version": "1.0.0",
+  "description": "Scrapes LSE chat posts and inserts into NodeBB topic",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bluebird": "^3.5.0",
+    "cheerio": "^0.22.0",
+    "chrono-node": "^1.3.1",
+    "to-markdown": "^3.0.4"
+  }
+}
