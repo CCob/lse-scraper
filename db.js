@@ -7,6 +7,8 @@
 
 	nconf.file({ file: path.join(__dirname, '../../config.json') });
 
+	nconf.set('base_dir', __dirname);
+
 	var dbType = nconf.get('database'),
 			productionDbConfig = nconf.get(dbType);
 
