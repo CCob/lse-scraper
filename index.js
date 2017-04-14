@@ -1,3 +1,4 @@
+'use strict';
 
 let cheerio = require('cheerio');
 let chrono = require('chrono-node');
@@ -71,7 +72,7 @@ let parsePage = function(pageContents){
 
             let post = {};
             try {
-            	referenceDate = new Date();
+            	const referenceDate = new Date();
                 post.id = parseInt(/chatPost_([0-9]*)/.exec($(elem).attr("id"))[1]);
                 post.subject = $('.FullChatSubject',elem).text();
                 post.body = $('.FullChatText',elem).html();
