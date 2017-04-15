@@ -73,7 +73,7 @@ let parsePage = function(pageContents){
 
             let post = {};
             try {
-            	const referenceDate = new Date();
+            	let referenceDate = new Date();
                 post.id = parseInt(/chatPost_([0-9]*)/.exec($(elem).attr("id"))[1]);
                 post.subject = $('.FullChatSubject',elem).text();
                 post.body = $('.FullChatText',elem).html();
