@@ -5,8 +5,11 @@ let chrono = require('chrono-node');
 let Promise = require('bluebird');
 let db = require('./db.js');
 let posts = require('../../src/posts');
+let topics = require('../../src/topics')
+let batch = require('../../src/batch');
 let toMarkdown = require('to-markdown');
 let winston = require('../../node_modules/winston');
+let async = require('async');
 
 const argv = require('minimist')(process.argv.slice(2));
 
@@ -14,6 +17,7 @@ let threadId = 14;
 let maxPageCount = 50;
 let delay = 10000;
 let ignoreDuplicates = false;
+let deletePostsBeforeImport = false;
 
 function getContent (url) {
     // return new pending promise
@@ -38,29 +42,50 @@ function getContent (url) {
 }
 
 let importPost = function(postInfo){
-	let exists = Promise.promisify(db.exists);
+	let getObjectField = Promise.promisify(db.getObjectField);
 	let setObjectField = Promise.promisify(db.setObjectField);
 	let createPost = Promise.promisify(posts.create);
+	let dbDelete = Promise.promisify(db.delete);
 	const importedPostKey = `_imported_post:${postInfo.id}`;
-	return exists(importedPostKey)
+	let postId = null;
+
+	return getObjectField(importedPostKey, 'pid')
 		.then( (result) => {
-			if(result) {
-				winston.debug(`No need to add post ${postInfo.id}, already exists`);
-				return false;
+			if (result != null) {
+				postId = result;
+				return getObjectField(`post:${postId}`, '_imported_post');
+			}else{
+				return Promise.resolve(0);
 			}
-			else {
-				return createPost({
-					uid: 0,
-					tid: threadId,
-					content: `**${postInfo.subject}**\n\n${toMarkdown(postInfo.body)}`,
-					timestamp: postInfo.date.getTime(),
-					handle: postInfo.user,
-				}).then((result) => {
-					return setObjectField(importedPostKey, 'pid', result.pid);
-				}).then((() => {
-					return true;
-				}))
-			}
+		})
+		.then( (importedPostId) => {
+			if(importedPostId == null) {
+				winston.warn(`Removing orphaned imported_post ${importedPostId}`);
+				return dbDelete(importedPostKey);
+			}else if(importedPostId > 0)
+				return Promise.reject(`Imported post with id ${importedPostId} already exists`);
+			else
+				return;
+		})
+		.then(() => {
+
+			let pid = null;
+			return createPost({
+				uid: 0,
+				tid: threadId,
+				content: `**${postInfo.subject}**\n\n${toMarkdown(postInfo.body)}`,
+				timestamp: postInfo.date.getTime(),
+				handle: postInfo.user,
+			}).then((result) => {
+				pid = result.pid;
+				return setObjectField(importedPostKey, 'pid', result.pid);
+			}).then(() => {
+				return setObjectField(`post:${pid}`, '_imported_post', postInfo.id);
+			}).then((() => {
+				return true;
+			}))
+		}, (reason) => {
+			winston.debug(reason);
 		})
 };
 
@@ -90,6 +115,53 @@ let parsePage = function(pageContents){
     });
 };
 
+function deletePostsIfNeeded(){
+
+	if(deletePostsBeforeImport) {
+		let processSortedSet = Promise.promisify(batch.processSortedSet, {multiArgs: true});
+
+		return processSortedSet('tid:' + threadId + ':posts', function (pids, next) {
+			async.eachLimit(pids, 10, function (pid, next) {
+				posts.purge(pid, 0, next);
+				winston.debug(`Deleting post with id ${pid}`);
+			});
+		}, {alwaysStartAt: 0})
+			.then(winston.info('Finished cleanup of topics posts'));
+	}else{
+		return new Promise((resolve,reject) =>{
+			winston.debug(`Not deleting topic posts`);
+			resolve();
+		})
+	}
+}
+
+function importNewPosts(i){
+	const url = `http://www.lse.co.uk/ShareChat.asp?page=${i}&ShareTicker=IRR`;
+	new Promise((resolve, reject) => {
+		winston.debug(`Fetching page ${i} from ${url}`);
+		getContent(url)
+			.then(parsePage)
+			.map(importPost)
+			.then(function(result){
+				const totalAdded = result.reduce( (total,added) => {return (added ? ++total : total)}, 0);
+				winston.info(`Added ${totalAdded} posts from page ${i}`);
+				resolve(totalAdded);
+			})
+			.catch(reject)
+	}).then( (totalAdded) =>  {
+		if(i < maxPageCount && (ignoreDuplicates || totalAdded > 0) ) {
+			importNewPosts(i + 1)
+		}
+		else {
+			winston.debug(`Finished page ${i}!`);
+			setTimeout(() => importNewPosts(1), delay * 1000);
+		}
+	} ).catch(function(error){
+		winston.error("Failed: " + error);
+		setTimeout(() => importNewPosts(1), delay * 1000);
+	});
+
+}
 
 if(argv.delay != null)
 	delay = parseInt(argv.delay);
@@ -103,35 +175,13 @@ if(argv.pages != null)
 if(argv.ignoreDuplicates != null)
 	ignoreDuplicates = argv.ignoreDuplicates === 'true';
 
-winston.info(`Starting LSE Scraper - delay:${delay} thread:${threadId} pages:${maxPageCount} ignoreDuplicates:${ignoreDuplicates}`);
+if(argv.deletePostsBeforeImport != null)
+	deletePostsBeforeImport = argv.deletePostsBeforeImport === 'true';
 
-(function loop(i) {
-    const url = `http://www.lse.co.uk/ShareChat.asp?page=${i}&ShareTicker=IRR`;
-    new Promise((resolve, reject) => {
-        winston.debug(`Fetching page ${i} from ${url}`);
-         getContent(url)
-             .then(parsePage)
-			 .map(importPost)
-			 .then(function(result){
-			 	const totalAdded = result.reduce( (total,added) => {return (added ? ++total : total)}, 0);
-			 	winston.info(`Added ${totalAdded} posts from page ${i}`);
-			 	resolve(totalAdded);
-			 })
-             .catch(reject)
-    }).then( (totalAdded) =>  {
-        if(i < maxPageCount && (ignoreDuplicates || totalAdded > 0) ) {
-			loop(i + 1)
-		}
-        else {
-			winston.debug(`Finished page ${i}!`);
-			setTimeout(() => loop(1), delay * 1000);
-		}
-    } ).catch(function(error){
-        winston.error("Failed: " + error);
-		setTimeout(() => loop(1), delay * 1000);
-    });
-})(1);
+winston.info(`Starting LSE Scraper - delay:${delay} thread:${threadId} pages:${maxPageCount} ignoreDuplicates:${ignoreDuplicates} deletePostsBeforeImport:${deletePostsBeforeImport}`);
 
+deletePostsIfNeeded()
+	.then(importNewPosts(1))
 
 if(process.stdin.isTTY) {
 	process.stdin.setRawMode(true);
