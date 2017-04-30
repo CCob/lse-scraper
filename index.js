@@ -18,6 +18,7 @@ let maxPageCount = 50;
 let delay = 10000;
 let ignoreDuplicates = false;
 let deletePostsBeforeImport = false;
+let deleteOnly = false;
 
 function getContent (url) {
     // return new pending promise
@@ -60,7 +61,7 @@ let importPost = function(postInfo){
 		})
 		.then( (importedPostId) => {
 			if(importedPostId == null) {
-				winston.warn(`Removing orphaned imported_post ${importedPostId}`);
+				winston.warn(`Removing orphaned imported_post ${postInfo.id}`);
 				return dbDelete(importedPostKey);
 			}else if(importedPostId > 0)
 				return Promise.reject(`Imported post with id ${importedPostId} already exists`);
@@ -178,10 +179,17 @@ if(argv.ignoreDuplicates != null)
 if(argv.deletePostsBeforeImport != null)
 	deletePostsBeforeImport = argv.deletePostsBeforeImport === 'true';
 
+if(argv.deleteOnly != null){
+	deleteOnly = argv.deleteOnly === 'true';
+}
+
 winston.info(`Starting LSE Scraper - delay:${delay} thread:${threadId} pages:${maxPageCount} ignoreDuplicates:${ignoreDuplicates} deletePostsBeforeImport:${deletePostsBeforeImport}`);
 
 deletePostsIfNeeded()
-	.then(importNewPosts(1))
+	.then(() => {
+		if (!deleteOnly)
+			importNewPosts(1);
+	})
 
 if(process.stdin.isTTY) {
 	process.stdin.setRawMode(true);
