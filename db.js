@@ -15,10 +15,6 @@
 	nconf.set(dbType, productionDbConfig);
 	var db = require('../../src/database');
 
-	db.init(function() {
-		console.log('db.ready');
-	});
-
 	module.exports = db;
 }(module));
 

@@ -185,11 +185,14 @@ if(argv.deleteOnly != null){
 
 winston.info(`Starting LSE Scraper - delay:${delay} thread:${threadId} pages:${maxPageCount} ignoreDuplicates:${ignoreDuplicates} deletePostsBeforeImport:${deletePostsBeforeImport}`);
 
-deletePostsIfNeeded()
-	.then(() => {
-		if (!deleteOnly)
-			importNewPosts(1);
-	})
+db.init(function() {
+	winston.info("Database ready");
+	deletePostsIfNeeded()
+		.then(() => {
+			if (!deleteOnly)
+				importNewPosts(1);
+		});
+});
 
 if(process.stdin.isTTY) {
 	process.stdin.setRawMode(true);
